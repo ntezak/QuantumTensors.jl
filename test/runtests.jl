@@ -34,7 +34,29 @@ function test_mul()
     @test norm((a*a' |> full) -(a|> full)*(a|> full)')<tol
 end
 
-
+module SymbolicTest
+  const sqrt_arr1 = sqrt(1:1000000)
+  const sqrt_arr2 = sqrt(1:1000000)
+  function a1ad2_symbolic!(y, x, α=0, β=1)
+    N1, N2=size(x)
+    
+    if α != 1
+      if α == 0
+        fill!(y, 0)
+      else
+        scale!(y, α)
+      end
+    end
+      
+    
+    for l=1:(N2-1)
+      @simd for k=1:(N1-1)
+        @inbounds y[k,l+1] +=  β * sqrt_arr1[k]*sqrt_arr2[l]*x[k+1,l]
+      end
+    end
+    y
+  end
+end
 
 function test_A_mul_B(N1=10,N2=10)
     tol = 1e-5
@@ -50,13 +72,14 @@ function test_A_mul_B(N1=10,N2=10)
     println("Tensor prod with allocation:")
     y1 = zeros(N1,N2)
     A_mul_B!(y1, a1ad2, x)
-    @time begin 
-        y1 = zeros(N1,N2)
-        A_mul_B!(y1, a1ad2, x)
+    gc()
+    @time begin
+        y1 = A_mul_B!(zeros(N1,N2), a1ad2, x)
     end
     
     println("Tensor prod (inplace):")
     y5 = zeros(N1,N2)
+    gc()
     @time begin 
         A_mul_B!(y5, a1ad2, x)
     end
@@ -72,7 +95,15 @@ function test_A_mul_B(N1=10,N2=10)
     end
     @test norm(2*y1[:] - y10[:]) < tol
 
-    
+    println("'Symbolic' application of specialized function:")
+    y11 = zeros(N1,N2)
+    SymbolicTest.a1ad2_symbolic!(y11, x, 3., 2.)
+    y11 *= 0
+    gc()
+    @time begin     
+        SymbolicTest.a1ad2_symbolic!(y11, x, 3., 2.)
+    end
+    @test norm(2*y1[:] - y11[:]) < tol
 
     println("Tensorproduct of individual products:")
     y2 = tensor(((a1|>sparse)*p1),((ad2|>sparse)*p2))
@@ -91,6 +122,8 @@ function test_A_mul_B(N1=10,N2=10)
     @test norm(y1[:] - y3[:]) < tol
 
     println("CSR mat-vec (inplace):")
+    A_mul_B!(2., a1ad2sp, xv, 1., y3)
+    y3[:] = y1[:]
     gc()
     @time A_mul_B!(2., a1ad2sp, xv, 1., y3)
     @test norm(3*y1[:] - y3[:]) < tol
@@ -107,12 +140,10 @@ function test_A_mul_B(N1=10,N2=10)
 
 end
 
-addprocs(3)
+# addprocs(3)
 versioninfo()
 test_to_sparse()
 test_to_full()
 test_transpose()
 test_mul()
-test_A_mul_B(10000,1000)
-
-
+test_A_mul_B(1000,1000)
