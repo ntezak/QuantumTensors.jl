@@ -250,9 +250,9 @@ end
 
 
 function apply_serial!(coeffs, toks::Vector{TensorOpProductKernel}, B::DenseArray, C::DenseArray, c=0)
-    A_mul_B_generated!(coeffs[1], toks[1], B, c, C)
+    A_mul_B!(coeffs[1], toks[1], B, c, C)
     for kk=2:length(toks)
-        A_mul_B_generated!(coeffs[kk], toks[kk], B, 1, C)
+        A_mul_B!(coeffs[kk], toks[kk], B, 1, C)
     end
     C
 end
