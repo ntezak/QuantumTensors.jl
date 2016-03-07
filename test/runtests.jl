@@ -56,6 +56,64 @@ module SymbolicTest
     end
     y
   end
+  function a1ad2_symbolic2!(y, x, α=0, β=1)
+    N1, N2=size(x)
+    
+    if α != 1
+      if α == 0
+        fill!(y, 0)
+      else
+        scale!(y, α)
+      end
+    end
+    
+    offset1 = -1
+    offset2 = 1
+    
+    oIDX = 1
+    iIDX = 1 - stride(x,1)*offset1 - stride(x,2)*offset2
+    for l=1:N2
+      lflag = 2 <= l <=N2
+      @simd for k=1:N1
+        kflag = 1 <= k <= N1-1
+        if kflag && lflag
+          @inbounds y[oIDX] +=  β * sqrt_arr1[k]*sqrt_arr2[l-1]*x[iIDX]
+        end
+        oIDX +=1
+        iIDX +=1
+      end
+    end
+    y
+  end
+  function a1ad2_symbolic3!(y, x, α=0, β=1)
+    N1, N2=size(x)
+    
+    if α != 1
+      if α == 0
+        fill!(y, 0)
+      else
+        scale!(y, α)
+      end
+    end
+    
+    offset1 = -1
+    offset2 = 1
+    
+    oIDX = 1
+    iIDX = 1 - stride(x,1)*offset1 - stride(x,2)*offset2
+    for l=1:N2
+      lflag = 2 <= l <=N2
+      for k=1:N1
+        kflag = 1 <= k <= N1-1
+        if kflag && lflag
+          @inbounds y[oIDX] +=  β * sqrt_arr1[k]*sqrt_arr2[l-1]*x[iIDX]
+        end
+        oIDX +=1
+        iIDX +=1
+      end
+    end
+    y
+  end
 end
 
 function test_A_mul_B(N1=10,N2=10)
@@ -104,6 +162,26 @@ function test_A_mul_B(N1=10,N2=10)
         SymbolicTest.a1ad2_symbolic!(y11, x, 3., 2.)
     end
     @test norm(2*y1[:] - y11[:]) < tol
+
+    println("'Symbolic' application of second specialized function:")
+    y12 = zeros(N1,N2)
+    SymbolicTest.a1ad2_symbolic2!(y12, x, 3., 2.)
+    y12 *= 0
+    gc()
+    @time begin     
+        SymbolicTest.a1ad2_symbolic2!(y12, x, 3., 2.)
+    end
+    @test norm(2*y1[:] - y12[:]) < tol
+
+    println("'Symbolic' application of third specialized function:")
+    y12 = zeros(N1,N2)
+    SymbolicTest.a1ad2_symbolic3!(y12, x, 3., 2.)
+    y12 *= 0
+    gc()
+    @time begin     
+        SymbolicTest.a1ad2_symbolic3!(y12, x, 3., 2.)
+    end
+    @test norm(2*y1[:] - y12[:]) < tol
 
     println("Tensorproduct of individual products:")
     y2 = tensor(((a1|>sparse)*p1),((ad2|>sparse)*p2))
