@@ -212,11 +212,11 @@ end
 
 # code for generating mat-vec loops
 @generated function top_kernel!(sC, sB, a, Avs::Union{DenseVector,IdentityOp}...)
-   code = top_kernel!_code(sC, sB, a, Avs)
+   code = top_kernel_code(sC, sB, a, Avs)
    println(code)
    code
 end
-function top_kernel!_code(sC, sB, a, Avs)
+function top_kernel_code(sC, sB, a, Avs)
     K = length(Avs)
     @assert K >= 1
     loop_vars = [symbol("k_$(j)") for j=1:K]
@@ -247,6 +247,10 @@ function top_kernel!_code(sC, sB, a, Avs)
     end
     loop
 end
+
+
+
+
 
 
 function apply_serial!(coeffs, toks::Vector{TensorOpProductKernel}, B::DenseArray, C::DenseArray, c=0)
