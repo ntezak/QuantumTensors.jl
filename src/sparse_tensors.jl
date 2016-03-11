@@ -2,10 +2,11 @@
 
 export TensorOp, DiagonalOp, 
     IdentityOp, TensorOpProduct, 
+    TensorOpProductSum,
     TensorOpProductKernel,
     create, destroy, sigma, 
     share, dim, tensor, 
-    iidx, oidx
+    iidx, oidx, all_close
 
 import Base: (*), transpose, conj, ctranspose, kron, A_mul_B!, sparse, full, 
               convert, promote_rule
@@ -31,13 +32,25 @@ end
 # end
 #
 
+type IdentityOp{N} <: TensorOp
+  # Identity operator with given dimension N
+end
+
 promote_rule{T,S}(::Type{DiagonalOp{T}}, ::Type{DiagonalOp{S}}) = DiagonalOp{promote_type(T,S)}
 convert{T}(::Type{DiagonalOp{T}}, op::DiagonalOp) = DiagonalOp(convert(Vector{T}, op.vals), op.jkm)
+convert{T,N}(::Type{DiagonalOp{T}}, op::IdentityOp{N}) = DiagonalOp(ones(T, N), (0,0,0))
 
 
-type IdentityOp{N} <: TensorOp
-    # Identity operator with given dimension N
+function all_close(op1::DiagonalOp, op2::DiagonalOp; tol=1e-8)
+  dim(op1) == dim(op2) || error("Incompatible shapes")
+  op1.jkm == op2.jkm && norm(op1.vals-op2.vals) < tol
 end
+
+all_close{T}(op1::IdentityOp, op2::DiagonalOp{T}; kw...) = all_close(convert(DiagonalOp{T},op1),op2; kw...)
+all_close{N}(op1::IdentityOp{N}, op2::IdentityOp{N}; kw...) = true
+all_close{T}(op1::DiagonalOp{T}, op2::IdentityOp; kw...) = all_close(convert(DiagonalOp{T},op2),op1; kw...)
+
+
 
 type TensorOpProduct{T,K}
     # Product of single degree tensor ops
@@ -55,6 +68,9 @@ function promote_diags(ops::TensorOp...)
   promoted_opsv[~nontrivial] = opsv[~nontrivial]
   tuple(promoted_opsv...)
 end
+
+
+
 
 function convert_diags{T}(S::Type{DiagonalOp{T}}, ops::TensorOp...)
   nops = Any[]
@@ -74,6 +90,10 @@ promote_rule{T,S,K}(::Type{TensorOpProduct{T,K}}, ::Type{TensorOpProduct{S,K}}) 
 promote_rule{T,S}(::Type{TensorOpProduct{T}}, ::Type{TensorOpProduct{S}}) = TensorOpProduct{promote_type(T,S)}
 convert{T,S,K}(::Type{TensorOpProduct{T,K}}, top::TensorOpProduct{S,K}) = TensorOpProduct(convert_diags(DiagonalOp{T}, top.ops...)...)
 convert{T}(::Type{TensorOpProduct{T}}, top::TensorOpProduct) = TensorOpProduct(convert_diags(DiagonalOp{T}, top.ops...)...)
+
+
+all_close(top1::TensorOpProduct, top2::TensorOpProduct; tol=1e-8) = all(Bool[all_close(op1, op2; tol=tol) for (op1,op2) in zip(top1.ops, top2.ops)])
+
 
 
 immutable TensorOpProductKernel{K}
@@ -99,19 +119,145 @@ type TensorOpProductSum{T,K,N}
     kernel
 end
 
-function TensorOpProductSum{K}(tops::TensorOpProduct{K}...)
+function TensorOpProductSum(tops::TensorOpProduct...)
   tops = promote(tops...)
   topops = [top.ops for top in tops]
-  println(topops)
   TensorOpProductSum(tuple(topops...), nothing)
 end
 
+all_close{T,S,K,N}(tops1::TensorOpProductSum{T,K,N}, 
+          tops2::TensorOpProductSum{S,K,N}; tol=1e-8) = all(
+            Bool[all_close(tops1.tops[n][k], tops2.tops[n][k]; tol=tol) for n=1:N, k=1:K])
+
+
+
+
+
 @generated function apply_topsum!(ts, tops, B::DenseArray, c, C::DenseArray)
-  println(ts, tops, B, c, C)
-  nothing
+code = apply_topsum_code(ts, tops, B, c, C)
+  println(code)
+  code
 end
 
+function apply_topsum_code(ts, tops, B, c, C)
+  # function diag_op_code(has_identity, offsets::Matrix{Int64}, nontrivial_factors::Matrix{Bool})
+  # N = number of nontrivial terms in sum
+  # D = number of tensor dimensions.
+  N = length(tops.parameters)
+  N >= 1 || error("Trivial Operator sum passed.")
+  D = length(tops.parameters[1].parameters)
+  
+  nontrivial_factors = Array(Bool, N, D)
+  for n=1:N
+      for d=1:D
+          nontrivial_factors[n,d] = tops.parameters[n].parameters[d] <: DiagonalOp
+      end
+  end
+  
+
+
+  IIDXs = [symbol("iidx_t$n") for n=1:N]
+  kds = [symbol("k_$d") for d=1:D]
+  flags = [symbol("apply_t$(n)_d$(d)") for n=1:N, d=1:D]
+  
+  diags = [symbol("diag_t$(n)_d$(d)") for n=1:N, d=1:D]
+  jnds = [symbol("j_$(n)_$(d)") for n=1:N, d=1:D]
+  knds = [symbol("k_$(n)_$(d)") for n=1:N, d=1:D]
+  mnds = [symbol("m_$(n)_$(d)") for n=1:N, d=1:D]
+  kdsmmnds = [nontrivial_factors[n,d] ? :($(kds[d])-$(mnds[n,d])) : kds[d] for n=1:N, d=1:D]
+  
+  diag_assignments = quote
+      # Assign DiagonalOp.vals and .jkm properties to variables
+  end
+  for n=1:N
+      for d=1:D
+          if nontrivial_factors[n,d]
+              push!(diag_assignments.args, quote
+                  $(diags[n,d]) = tops[$n][$d].vals
+                  ($(jnds[n,d]),$(knds[n,d]),$(mnds[n,d])) = tops[$n][$d].jkm
+#                     println($n, ", ", $d, ": ", tops[$n][$d].jkm)
+                  end)
+          end
+      end
+  end
+  
+  
+  flag_updates = Any[quote end for d=1:D]
+
+  for n=1:N
+      if nontrivial_factors[n,D]
+          push!(flag_updates[D].args,:(
+          $(flags[n,D]) = ($(kdsmmnds[n,D]) in 1:size(C,$D)) && $(kds[D]) in (1+$(jnds[n,D])):(size(C,$D)-$(knds[n,D]));
+          ))
+      else
+          push!(flag_updates[D].args,:($(flags[n,D]) = true))
+      end
+
+  end
+  for d=1:D-1
+      for n=1:N
+          if nontrivial_factors[n,d]
+              push!(flag_updates[d].args,:(
+              $(flags[n,d]) = $(flags[n,d+1]) && ($(kdsmmnds[n,d]) in 1:(size(C,$d))) && $(kds[d]) in (1+$(jnds[n,d])):(size(C,$d)-$(knds[n,d]));
+              ))
+              
+          else
+              push!(flag_updates[d].args,:($(flags[n,d]) = $(flags[n,d+1])))
+          end
+      end
+  end
+  
+
+  innerloop_stmts = quote
+      $(Expr(:ref, :C, kds...)) = c * $(Expr(:ref, :C, kds...))
+  end
+  
+
+  for n=1:N
       
+      tensor_elements = Expr(:call, :(*), :(ts[$n]), Expr(:ref, :B, kdsmmnds[n,:]...))
+      
+      for d=1:D
+          if nontrivial_factors[n,d]
+              push!(tensor_elements.args,:($(diags[n,d])[$(kds[d])-$(jnds[n,d])]))
+          end
+      end
+
+      push!(innerloop_stmts.args,
+          :(
+          if $(flags[n,1])
+              $(Expr(:ref, :C, kds...)) += $tensor_elements
+#             else
+#             println($n, ":    ", $(kds[1]),", ", $(kds[2]))
+      end
+          )
+      )
+
+  end
+  
+  innerloop = quote
+      @simd for $(kds[1])=1:size(C,1)
+          $(flag_updates[1])
+          @inbounds begin
+              $innerloop_stmts
+          end
+      end
+  end
+  loop = innerloop
+  for d=2:D
+      loop = quote
+          for $(kds[d])=1:size(C,$d)
+              $(flag_updates[d])
+              $loop
+          end
+      end
+  end
+  quote
+      $diag_assignments
+      $loop
+      C
+  end
+end
 
 # 
 # function share(a::SharedArray)

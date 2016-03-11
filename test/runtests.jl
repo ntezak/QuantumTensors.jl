@@ -27,6 +27,79 @@ function test_transpose()
     @test norm((destroy(5) |>full) - (create(5) |> transpose |>full)) < tol
 end
 
+
+function test_convert_promote_ops()
+  tol = 1e-10
+  N = 5
+  # a = destroy(N)
+  # ac = convert(DiagonalOp{Complex128}, a)
+  idt = IdentityOp{N}()
+  idtf = convert(DiagonalOp{Float64}, idt)
+  idtz1 = convert(DiagonalOp{Complex128}, idt)
+  idtz2 = convert(DiagonalOp{Complex128}, idtf)
+  idtz3, idtz4 = promote(idtf, idtz1)
+  @test idtz4 === idtz1
+  @test isa(idtf, DiagonalOp{Float64})
+  @test isa(idtz1, DiagonalOp{Complex128})
+  @test isa(idtz2, DiagonalOp{Complex128})
+  @test isa(idtz3, DiagonalOp{Complex128})
+  @test idtf.jkm == (0,0,0)
+  @test idtz1.jkm == (0,0,0)
+  @test idtz2.jkm == (0,0,0)
+  @test idtz3.jkm == (0,0,0)
+  @test norm(idtf.vals - ones(N)) < tol
+  @test norm(idtz1.vals - ones(N)) < tol
+  @test norm(idtz2.vals - ones(N)) < tol
+  @test norm(idtz3.vals - ones(N)) < tol
+  
+  @test all_close(idt, idtf)
+  @test all_close(idt, idtz1)
+  @test all_close(idt, idtz2)
+  @test all_close(idt, idtz3)
+  @test all_close(idt, idtz4)
+  @test all_close(idtf, idtz1)
+  @test all_close(idtf, idtz2)
+  @test all_close(idtf, idtz3)
+  @test all_close(idtf, idtz4)
+end
+
+
+function test_convert_promote_tops()
+  tol = 1e-10
+  N = 5
+  a = destroy(N)
+  bc = convert(DiagonalOp{Complex128}, destroy(N))
+  
+  ac, bc = promote(a, bc)
+  @test bc === bc
+  @test all_close(ac, a)
+  abc = tensor(a, bc)
+  acbc = tensor(ac, bc)
+  
+  @test typeof(abc) === typeof(acbc)
+  @test all_close(abc, acbc)
+end
+
+function test_convert_promote_topsum()
+  tol = 1e-10
+  N = 5
+  a = destroy(N)
+  bc = convert(DiagonalOp{Complex128}, destroy(N))
+  ii = IdentityOp{N}()
+  
+  ac, bc = promote(a, bc)
+  @test bc === bc
+  @test all_close(ac, a)
+  abc = tensor(a, bc)
+  acbc = tensor(ac, bc)
+  
+  iibc = tensor(ii, bc)
+  aii = tensor(a, ii)
+  
+  tops = TensorOpProductSum(abc, iibc, aii)
+end
+
+
 function test_mul()
     tol = 1e-10
     a = destroy(5)
@@ -210,12 +283,6 @@ function test_A_mul_B(N1=10,N2=10)
     println("Size of vectors: ", Base.summarysize(x)/1024^2, " MB")
     println("Size of sparse matrix rep: ", Base.summarysize(a1ad2sp)/1024^2, " MB")
     println("Size of tensor matrix rep: ", Base.summarysize(a1ad2)/1024^2, " MB")
-
-
-    
-
-
-
 end
 
 # addprocs(3)
@@ -224,4 +291,7 @@ test_to_sparse()
 test_to_full()
 test_transpose()
 test_mul()
+test_convert_promote_ops()
+test_convert_promote_tops()
+test_convert_promote_topsum()
 test_A_mul_B(1000,1000)
