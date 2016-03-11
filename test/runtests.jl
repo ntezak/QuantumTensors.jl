@@ -9,6 +9,15 @@ function test_to_sparse()
     @test norm(((destroy(N) |> sparse) - spdiagm(sqrt(1:(N-1)),1,N,N))|>full )< tol
     @test norm(((create(N) |> sparse) - spdiagm(sqrt(1:(N-1)),-1,N,N))|>full )< tol
     @test norm(((jz(N) |> sparse) - spdiagm(-N:N,0,2N+1,2N+1))|>full) < tol
+    
+    jzm = jz(N) |> sparse
+    jp = jplus(N) |> sparse
+    jm1 = jp'
+    jm2 = jminus(N) |> SparseMatrixCSC
+    @test norm((jm1-jm2)|> full) < tol
+    
+    comm_rel = jp*jm - jm*jp
+    @test norm((comm_rel-2jzm)|>full) < tol
 end
 
 function test_to_full()
