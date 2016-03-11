@@ -6,6 +6,8 @@
 This package contains special methods for efficiently representing sparse local quantum operators that act on a tensor product space.
 The most important methods are:
 
+    using QuantumTensors
+
     # Create a creation operator with N basis states
     create(N)
 
