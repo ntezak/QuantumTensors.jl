@@ -8,6 +8,7 @@ function test_to_sparse()
     N = 5
     @test norm(((destroy(N) |> sparse) - spdiagm(sqrt(1:(N-1)),1,N,N))|>full )< tol
     @test norm(((create(N) |> sparse) - spdiagm(sqrt(1:(N-1)),-1,N,N))|>full )< tol
+    @test norm(((jz(N) |> sparse) - spdiagm(-N:N,0,2N+1,2N+1))|>full) < tol
 end
 
 function test_to_full()
@@ -100,11 +101,81 @@ function test_convert_promote_topsum()
 end
 
 
+
+
 function test_mul()
     tol = 1e-10
     a = destroy(5)
     @test norm((a*a |> full) -(a|> full)*(a|> full)) < tol
     @test norm((a*a' |> full) -(a|> full)*(a|> full)')<tol
+end
+
+
+
+function test_apply_serial(N=20,tol=1e-8)
+  println("Testing serial application of operators")
+  a = destroy(N)
+  b = destroy(N)
+  c = destroy(N)
+  II = IdentityOp{N}()
+  tops = (tensor(a', b, II), tensor(a, b', II), tensor(II, II, c'*c))
+  topsum = TensorOpProductSum(tops...)
+
+  B = randn(N,N,N)
+  C = zeros(N,N,N)
+  coeffs = [1.,1.,1.]
+  apply_serial!(coeffs, topsum, B, C)
+  # Profile.clear()
+  println("apply_serial!: TensorOpProductSum ")
+  gc()
+  @time for k=1:10
+      apply_serial!(coeffs, topsum, B,C)
+  end
+  
+
+  topskarr = collect([TensorOpProductKernel(top) for top in tops]);
+  topsarr = collect(tops);
+
+  println("apply_serial!: [TensorOpProductKernel]")
+  Cpp = zeros(C)
+  apply_serial!(coeffs, topskarr, B, Cpp)
+  gc()
+  @time for k=1:10
+      apply_serial!(coeffs, topskarr, B, Cpp)
+  end
+  
+  @test (norm((Cpp-C)[:])) < tol
+
+  println("apply_serial!: [TensorOpProduct]")
+  Cpp = zeros(C)
+  apply_serial!(coeffs, topsarr, B, Cpp)
+  gc()
+  @time for k=1:10
+      apply_serial!(coeffs, topsarr, B, Cpp)
+  end
+  @test norm((Cpp-C)[:]) < tol
+
+  Cp = zeros(C)
+  Cpf = sub(Cp,1:length(C));
+  Bf = sub(B,1:length(B));
+  top_sps = [sparse(top) for top = tops]
+  combinedsp = sum(top_sps)
+  println("combined CSR matrix")
+  A_mul_B!(Cpf, combinedsp, Bf)
+  gc()
+  @time for k=1:10
+      A_mul_B!(Cpf, combinedsp, Bf)
+  end
+  @test norm((Cp-C)[:]) < tol
+  
+  
+  println("apply_serial!: [CSR-mat]")
+  apply_serial!(coeffs, top_sps, Bf, Cpf)
+  gc()
+  @time for k=1:10
+      apply_serial!(coeffs, top_sps, Bf, Cpf)
+  end
+  @test norm((Cp-C)[:]) < tol
 end
 
 module SymbolicTest
@@ -190,6 +261,7 @@ module SymbolicTest
 end
 
 function test_A_mul_B(N1=10,N2=10)
+    println("Testing application of single tensor product operators to vectors")
     tol = 1e-5
     a1 = destroy(N1)
     ad2 = create(N2)
@@ -294,4 +366,5 @@ test_mul()
 test_convert_promote_ops()
 test_convert_promote_tops()
 test_convert_promote_topsum()
+test_apply_serial(30)
 test_A_mul_B(1000,1000)
