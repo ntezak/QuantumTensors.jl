@@ -40,3 +40,6 @@ The most important methods are:
     # in-place apply a sequence single tensor product operators to a state
     # with certain coefficients (supports CSR type sparse matrices as well)
     apply_serial!([λ1,λ2], [A1,A2], Ψ, μ, Φ) ==>  Φ -> μ Φ + λ1 A1.Ψ + λ2 A2.Ψ
+
+
+Documentation will fleshed out more soon. See the tests for some further usage examples.
