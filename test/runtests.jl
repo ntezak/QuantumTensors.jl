@@ -13,10 +13,10 @@ function test_to_sparse()
     jzm = jz(N) |> sparse
     jp = jplus(N) |> sparse
     jm1 = jp'
-    jm2 = jminus(N) |> SparseMatrixCSC
+    jm2 = jminus(N) |> sparse
     @test norm((jm1-jm2)|> full) < tol
     
-    comm_rel = jp*jm - jm*jp
+    comm_rel = jp*jm1 - jm1*jp
     @test norm((comm_rel-2jzm)|>full) < tol
 end
 
